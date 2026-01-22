@@ -1,5 +1,30 @@
 import networkx as nx
 
+"""
+SeCoT (Semantic Code Analysis)
+
+1.  **Control Flow:**
+    *   **Start** -\> Call `step5_generate_forwarding_entries`
+    *   **Initialization:** Create `residual_flows` dictionary by filtering valid flows.
+    *   **Outer Loop:** While `residual_flows` is not empty:
+        *   **Build Graph View:** Generate an adjacency list from current flows.
+        *   **Source Selection:** Identify a starting node. Prefer "pure sources" (nodes with out-degree \> 0 and in-degree == 0). If none (cyclic flow), pick an arbitrary node with outgoing edges.
+        *   **Path Finding (Inner Loop):** Start traversal from `start_node`. Greedily follow edges in `adjacency` to construct a path until a node has no outgoing residual edges (sink) or a cycle is detected.
+        *   **Validation:** If a valid path (\>1 node) is not found, attempt to clean up stuck nodes/edges and `continue`.
+        *   **Bottleneck Calculation:** Iterate through edges in the found `path` to identify the `min_rate` (minimum edge flow).
+        *   **Record:** Store the path and rate in `forwarding_paths`.
+        *   **Update:** Iterate through `path` edges again, subtracting `min_rate` from `residual_flows`. Remove edges that drop to zero.
+    *   **Return:** Return `forwarding_paths` -\> **End**
+2.  **Data Flow:**
+    *   `final_flow_dict` is filtered into `residual_flows`.
+    *   `residual_flows` determines the `adjacency` structure.
+    *   `adjacency` is used to derive `start_node` and the subsequent `path` list.
+    *   `path` + `residual_flows` are used to compute `min_rate` (scalar).
+    *   `path` and `min_rate` are packaged into a dictionary and appended to `forwarding_paths`.
+    *   `min_rate` is fed back into `residual_flows` to reduce values, eventually emptying the dictionary and terminating the loop.
+3.  **Finally:** The code implements a Greedy Flow Decomposition algorithm . It systematically extracts paths from a flow field, ensuring that the sum of rates on extracted paths equals the original edge flow, satisfying the requirement to generate forwarding entries.
+"""
+
 def step5_generate_forwarding_entries(topology, final_flow_dict):
     """
     Generates explicit forwarding paths from edge flow allocations using Greedy Flow Decomposition.
