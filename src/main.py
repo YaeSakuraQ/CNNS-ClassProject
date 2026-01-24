@@ -42,12 +42,12 @@ except Exception as e:  # pragma: no cover
     print(f"[FATAL] gurobipy not available: {e}", file=sys.stderr)
     sys.exit(2)
 
-from src.ncflow import (
+from ncflow import (
     step1_offline_clustering,
     step2_online_flow_allocation,
     step5_generate_forwarding_entries,
 )
-from src.ncflow.utils import (
+from ncflow.utils import (
     get_physical_crossing_edges,
     load_topology_zoo,
     resolve_demand_path,
