@@ -4,6 +4,633 @@
 **Link:** [https://gemini.google.com/app/1d6aedf837adf2b3](https://gemini.google.com/app/1d6aedf837adf2b3)
 
 ## Prompt:
+
+I want to reproduce the work of a network domain paper by programming. To accomplish this task, I will first give you the Introduction section of this paper, and based on this section, you should answer the following questions step by step: Q1: Which sub-field of the network does this paper belong to? \[Please answer it as precisely and briefly as possible, and do not give more than 3 sub-fields.\] Q2: What is the system proposed in the paper? \[Just give the name of the system.\] Q3: What problem does the proposed system attempt to solve? Q4: What are the inputs and outputs of the system, and is it centralized or distributed? Your answers should be given in the following format: { "subfield": \["FIELD1", "FIELD2", ...\], "system\_name": "...", "problem\_to\_solve": "...", "input": "...", "output": "...", "architecture": "..." }
+
+The Introduction section is:
+
+1 Introduction
+
+Wide-area networks (WANs), which connect locations across
+
+the globe with high-capacity optical fiber, are an expensive
+
+resource \[7, 35, 36, 38\]. Hence, enterprises seek to carefully
+
+manage the traffic on their WANs to offer low latency and
+
+jitter for customer-facing applications \[28, 62, 69\] and fast
+
+response times for bulk data transfers \[46, 56\].
+
+The state-of-the-art approach used in several enterprises
+
+today \[35, 36, 38\] is to compute optimal routing schemes for
+
+the current demand by solving global multi-commodity flow
+
+problems \[7,35,36,38\]; the global flow problems are re-solved
+
+periodically, since demands may change or links may fail,
+
+and the computed routes are encoded into switch forwarding
+
+tables using software-defined networking techniques \[7\].
+
+As network sizes grow, solving multi-commodity flow prob
+
+lems on the entire network becomes practically intractable.
+
+As noted in \[36\], the “algorithm run time increased super
+
+linearly with the site count,” which led to “extended periods
+
+of traffic blackholing during data plane failures, ultimately
+
+violating our availability targets,” as well as “scaling pressure
+
+on limited space in switch forwarding tables.” This problem
+
+is unlikely to go away: anecdotal reports indicate that WAN
+
+Figure 2: The original network on the left is divided into clusters, shown
+
+with different background colors. The contracted network is on the right.
+
+footprints today are already over 10× larger than the few tens
+
+of sites that were considered in prior work \[35, 36\], since
+
+enterprises have built more sites to move closer to users.
+
+In this paper, we seek to retain the benefits of global traffic
+
+management for large WAN networks without requiring ex
+
+cessively many forwarding entries at switches or prohibitively
+
+long solver runtimes. Also, by using a faster solver, WAN
+
+operators can reduce loss when faults occur and carry more
+
+traffic on the network by tracking demand changes.
+
+Our solution is motivated by the observation that WAN
+
+topologies and demands are concentrated: the topology typi
+
+cally has well-connected portions separated by a few, lower
+
+capacity edges, and more demand is between nearby datacen
+
+ters. This is likely due to multiple operational considerations:
+
+(1) submarine cables have become shared choke points for
+
+connectivity between continents (see Figure 3), (2) the con
+
+nectivity over land follows the road or rail networks along
+
+which fiber is typically laid out, and (3) enterprises build
+
+datacenters close to users, then steer traffic to nearby datacen
+
+ters \[12, 62, 69\]. Therefore, more capacity and demand are
+
+available between nearby nodes; an analysis of data from a
+
+large enterprise WAN in §2 supports this observation.
+
+We leverage this concentration of capacity and demand
+
+to decompose the global flow problem into several smaller
+
+problems, many of which can be solved in parallel. As shown
+
+Figure 3: Submarine cables serve as choke points in WAN topologies; figure
+
+is excerpted from \[63\].
+
+in Figure 2, we divide the network into multiple connected
+
+components, which we refer to as clusters. We then solve
+
+modified flow problems on each cluster, as well as on the con
+
+tracted network, where nodes are clusters and edges connect
+
+clusters that have connected nodes. Prior work \[4,9,15\] notes
+
+that Google and other map providers use different contractions
+
+to compute shortest paths on road network graphs. Our goal
+
+is to closely match the multi-commodity max flow solution in
+
+quality (i.e., carry nearly as much total flow), while reducing
+
+the solver runtime and number of required forwarding entries.
+
+We discuss related work in §7; to our knowledge, we are the
+
+first to demonstrate a practical technique for multi-commodity
+
+flow problems on large WAN topologies.
+
+Solving flow problems on the contracted network poses
+
+two key challenges:
+
+1\. How to partition the network into clusters? More clusters
+
+leads to greater parallelism, but maximizing the inter
+
+cluster flow requires careful coordination between the
+
+sub-problems at multiple clusters.
+
+2\. How to design the sub-problems for each cluster to im
+
+prove speed while reducing inconsistencies in alloca
+
+tion? The sub-problem for a cluster has fewer nodes and
+
+edges to consider, but it will not be be faster if it must
+
+consider all node pairs whose traffic can pass through
+
+the cluster.
+
+Our solution NCFlow1
+
+achieves a high-quality flow alloca
+
+tion with a low runtime and space complexity by addressing
+
+each of these challenges in turn. First, we contract the network
+
+using well-studied algorithms such as modularity-based clus
+
+tering \[25\] and spectral clustering \[53\], which are designed
+
+to identify the choke-point edges in a network. Second, we
+
+bundle demands whose sources and/or targets are in the same
+
+cluster, treating them as a single demand. In Figure 2 for ex
+
+ample, the yellow cluster considers as one bundled demand
+
+all traffic from source nodes in the red cluster to target nodes
+
+in the green cluster. Doing so can lead to inconsistent flow
+
+allocations between clusters (which we explain in §3.1.1) and
+
+we devise careful heuristics to provably avoid them (§3.2).
+
+Finally, we reduce the forwarding entries needed at switches
+
+Figure 4: On the left, we plot the L2 norm of the change in the demands
+
+between successive 5-minute periods divided by the L2 norm of the traffic
+
+matrix at a time. On the right, we show the CDF of this change ratio. We
+
+also show a CDF of the fraction of demand that is unsatisfied if using the
+
+allocation computed for the previous period.
+
+by reusing pathlets within clusters and traffic splitting rules
+
+across multiple demands (§3.5).
+
+Figure 1 shows the workflow for NCFlow. First, we choose
+
+appropriate clusters and paths using an offline procedure over
+
+historical traffic—these choices are pushed into the switch
+
+forwarding entries. This step happens infrequently, such as
+
+when the topology and/or traffic changes substantially. Then,
+
+online (e.g., once every few minutes), NCFlow computes how
+
+best to route the traffic over the clusters and paths, similar to
+
+deployed solutions \[35, 36, 38\].
+
+Overall, our key contributions are:
+
+• We propose NCFlow, a decomposition of the multi
+
+commodity max flow problem into an offline cluster
+
+ing step and an online, provably feasible, algorithm that
+
+solves a set of smaller sub-problems in parallel.
+
+• We evaluate NCFlow using real traffic on a large enter
+
+prise WAN, as well as synthetic traffic on eleven topolo
+
+gies from the Internet Topology Zoo \[6\]. Our results
+
+show that, for multi-commodity max flow, NCFlow is
+
+within 2% of the total flow allocated by state-of-the
+
+art path-based LP solvers \[35, 36, 38\] in 50% of cases;
+
+NCFlow is within 20% in 97% of cases. Furthermore,
+
+NCFlow is at least 8× faster than path-based LP solvers
+
+in the median case; in 20% of cases, NCFlow is over
+
+30× faster. Lastly, NCFlow requires 2.7–16.7× fewer
+
+forwarding entries in the evaluated topologies. NCFlow
+
+also compares favorably to state-of-the-art approxima
+
+tion algorithms \[27,41\] and oblivious techniques \[44,57\].
+
+• We show that, as a fast approximate solver, NCFlow can
+
+be used to react quickly to demand changes and link
+
+failures. Specifically, in comparison to TEAVAR \[19\],
+
+NCFlow carries more flow when no faults occur and suf
+
+fers about the same amount of total loss during failures.
+
+We have open-sourced an anonymous version of NCFlow \[2\],
+
+and are in the early stages of integrating NCFlow into produc
+
+tion use at a large enterprise
+
+The background section is:
+
+2 Background and Motivation
+
+We analyze the changes in topology and traffic on a large
+
+enterprise WAN over a several-month period. As Figure 4
+
+176 18th USENIX Symposium on Networked Systems Design and Implementation
+
+USENIX Association
+
+Normalized
+
+Change
+
+CDF112
+
+202
+
+294 372 486
+
+1790
+
+\# of Edges (log scale)
+
+102
+
+101
+
+100
+
+110011
+
+102
+
+103
+
+5-minute time window
+
+Figure 5: Runtimes of a state-of-the-art solver on topologies from Internet
+
+Topology Zoo \[6\]. Both axes are in log scale and the band represents stan
+
+dard deviation. In production WANs, new traffic demands arrive every few
+
+minutes \[35, 38\].
+
+shows, the change in traffic demand from one 5-minute win
+
+dow to the next is substantial; the average change is 35%;
+
+in 20% of the cases, the traffic change is over 45%. The en
+
+terprise solves a global flow allocation problem every few
+
+minutes. The figure on the right shows the fraction of traffic
+
+that will remain unsatisfied if the flow allocation from the
+
+previous window were to be used instead of computing a new
+
+allocation. We see that the median loss is 13%; in 20% of the
+
+cases, over 20% of the demand remains unsatisfied. We verify
+
+that computing a new allocation will satisfy all of the demand;
+
+using the previous window’s allocation causes loss because
+
+some datacenter pairs may receive more flow in the previous
+
+allocation than their current demand while other datacenter
+
+pairs go unsatisfied.
+
+Given the above data, computing a new allocation in each
+
+time window is needed to carry more traffic on the WAN.
+
+However, solver runtime increases super-linearly with the
+
+size of the topology, as shown in Figure 5. For several public
+
+topologies and on a variety of traffic matrices, we benchmark
+
+the multi-commodity max-flow problem (specifically PF4, as
+
+will be described in §5.1). The runtimes were measured on a
+
+server-grade machine using a production-grade optimization
+
+library \[33\]. As the figure shows, when the topology size ex
+
+ceeds a thousand edges, the time to compute a flow allocation
+
+can exceed the allotted time window.
+
+A fast solver would not only ensure that new allocations
+
+complete in time—it could also enable more frequent alloca
+
+tions, e.g., every minute. Doing so would enable allocations
+
+to track changing demands at a finer granularity. Moreover,
+
+as we show in §5, a fast solver can help when reacting to link
+
+and switch failures.
+
+Our observation that demand and capacity are concentrated
+
+among nearby nodes is grounded on the following measure
+
+ments from a production WAN:
+
+Demand properties:
+
+• On average, 7% (or 16%) of the node pairs account for
+
+half (or 75%) of the total demand.
+
+• When nodes are divided into a few tens of clusters, 47%
+
+of the total traffic stays within clusters. If the demands
+
+were distributed uniformly across node pairs, only 8%
+
+of the traffic would stay within clusters; thus the demand
+
+within clusters is about 6× larger than would be expected
+
+from a uniform distribution.
+
+WAN topology properties:
+
+• When nodes are divided into tens of clusters, 76% of all
+
+edges and 87% of total capacity is within clusters.
+
+• The skew in capacity is small: the ratio between the
+
+largest edge capacity and the mean is 10.4.
+
+• The skew in node degree is also small: the average node
+
+degree is 3.9, with σ = 2.6; the max is 16.
+
+• Relative to the network size (hundreds of nodes), the
+
+average network diameter (=11) and the average shortest
+
+path length (= 5.3) are very small.
+
+Motivated by the above analyses, NCFlow seeks to be a fast
+
+solver for large WAN topologies by leveraging the concentra
+
+tion of traffic demands and capacity.
+
+Background: Before we describe NCFlow’s design, we give
+
+some background on multi-commodity flow problems. Given
+
+a set of nodes, capacitated edges, and demands between nodes,
+
+a flow allocation is feasible if it satisfies demand and capacity
+
+constraints. The goal of a multi-commodity flow problem is to
+
+find a feasible flow which optimizes a given objective; Table 1
+
+lists some common flavors.
+
+The fastest algorithms \[27, 41\] are approximate; i.e., given
+
+a parameter ε, they achieve at least (1−ε)× the optimal value.
+
+And, their runtime complexity is at least quadratic (Table 1).
+
+Moreover, these solutions allow demands to travel on any
+
+edge, thus requiring millions of forwarding table entries at
+
+each switch for thousand-node topologies. Instead, produc
+
+tion systems \[35, 38\] restrict flow to a small number of pre
+
+configured paths per demand, which reduces the required
+
+forwarding table entries by 10–100×.
+
+Using notation from Table 2, the feasible flow over a pre
+
+configured set of paths can be defined as:
+
+FeasibleFlow(V ,E,D,P) , fk | ∀k ∈ D and (1)
+
+fk =
+
+∑
+
+p∈Pk
+
+fk
+
+p,
+
+∀k ∈ D
+
+(flow for demand k)
+
+fk ≤ dk,
+
+∀k ∈ D
+
+(flow below volume)
+
+∑
+
+∀k,p∈Pk,e∈p
+
+fk
+
+p ≤ ce,
+
+∀e ∈ E
+
+(flow below capacity)
+
+fk
+
+p ≥ 0
+
+∀p ∈ P, k ∈ D
+
+(non-negative flow)
+
+Production systems use linear optimization-based
+
+solvers \[35, 36, 38\]. On WANs with thousands of nodes, the
+
+optimization problem could have millions of variables and
+
+equations just to verify that a flow allocation is feasible.
+
+In this paper, we consider the problem of maximizing the
+
+total flow across all demands:
+
+SDN-based traffic engineering schemes \[35, 38\], in addi
+
+tion to repeatedly solving global optimizations, must maintain
+
+an up-to-date view of the topology, gather desired volumes
+
+for demands and update traffic splits at switches based on the
+
+result of the optimization. Our production experience is that
+
+most of these repetitive steps have a latency of a few RTTs
+
+(round trip times) and so solving the optimization dominates,
+
+especially on large topologies. Moreover, demands are lim
+
+ited to their allocated rates in software at the source servers
+
+and thus allocating less than the full desired rate need not
+
+result in packet loss \[35\]. Finally, applications that contribute
+
+a large fraction of the bytes moving between datacenters are
+
+elastic in short timescales; e.g., large dataset transfers for data
+
+analytics. That is, these apps seek a fast completion time but
+
+do not need a large rate in every optimization epoch. Some
+
+other applications have a decreasing marginal utility as their
+
+rate allocation increases such as video streams of varying
+
+quality \[43\]. Today’s SDN-based TE solutions \[35, 38\] use
+
+multiple priority classes to maximize allocations for elastic
+
+traffic without affecting the latency-sensitive traffic.
+
+## Response:
+
+> Thinking:
+>
+> > Thinking:
+> >
+> > **Focusing on Information Extraction**
+> >
+> > I'm now zeroing in on the Introduction and Background sections of the research paper. My primary aim is to pinpoint the exact information required to address the user's four specific questions (Q1-Q4). Currently, I'm analyzing the text to discern relevant key concepts, methodologies, and context regarding network traffic engineering. The target is the most important pieces of data.
+> >
+> > **Extracting Key Details**
+> >
+> > I've moved on to the core of the introduction. I'm actively extracting specific details to answer the user's questions (Q1-Q4). For Q1, I've identified "Traffic Engineering," "Wide Area Network (WAN)," and "Software-Defined Networking (SDN)." Q2 is straightforward, with the system name "NCFlow". Finally, for Q3, the core problem is related to the intractability of solving multi-commodity flow problems at scale.
+> >
+> > **Pinpointing Solution Architecture**
+> >
+> > I'm now identifying the input, output, and architectural components. The inputs include network topology, traffic demands, and edge capacities. The outputs will encompass routing schemes, traffic splitting rules, and forwarding table entries. The architecture centers around a decomposition approach to address scalability in large WANs.
+> >
+> > **Determining Centralized Approach**
+> >
+> > My current focus is on the workflow. I'm unpacking the paper's claims about a parallelized approach and classifying the NCFlow system's architecture. The descriptions lean toward a decomposed, yet still logically centralized, SDN-based solution. The paper is using SDN techniques and reference \[7\] is usually a centralized B4 example. I'm clarifying if the constraint is actually centralized or distributed.
+> >
+> > **Refining Architectural Decisions**
+> >
+> > I'm now zeroing in on the system's architecture. The descriptions clearly outline a decomposed, but still centralized, SDN-based solution. Although the text uses "parallel" and "contracted network," it points to a hierarchical approach. I'm focusing on clarifying if the key constraint is actually about centralization or distribution.
+> >
+> > **Consolidating Key Aspects**
+> >
+> > I am now focusing on refining the extracted information to ensure accuracy. I've re-examined the key details related to the system. Specifically, I am solidifying the critical aspects, which include sub-fields like Traffic Engineering, WAN, and SDN, and the name "NCFlow". Furthermore, I am confirming the problem is related to the intractability of solving global multi-commodity flow problems in large-scale WANs, specifically around runtime and memory.
+> >
+> > **Defining System Architecture**
+> >
+> > I am now solidifying the architectural classification as 'Centralized', which is appropriate for an SDN solution. The paper operates as a solver replacement in an SDN loop, even if the underlying math is decomposed, and is distinct from fully distributed methods. I'm focusing on why a distributed architecture is not applicable in this case.
+> >
+> > **Defining the Problem Explicitly**
+> >
+> > I'm now clarifying the problem statement. It's now explicitly formulated as: "Solving multi-commodity flow problems on large WAN topologies is practically intractable due to super-linear solver runtimes and limited switch forwarding table space." I am updating the input as "nodes, capacitated edges, and demands," with "flow allocation and forwarding table entries" as the output. I'm focusing on clarifying that I need the JSON block. The prompt instructs to use that format.
+
+Based on the Introduction and Background sections provided, here are the answers to your questions:
+
+```
+{ 
+  "subfield": [
+    "Traffic Engineering", 
+    "Wide Area Network (WAN)", 
+    "Software-Defined Networking (SDN)"
+  ], 
+  "system_name": "NCFlow", 
+  "problem_to_solve": "The intractability of solving global multi-commodity flow problems for traffic management in large-scale WANs, specifically addressing prohibitively long solver runtimes and the excessive number of forwarding entries required at switches.", 
+  "input": "Network topology (nodes and capacitated edges) and traffic demand matrices (source-destination traffic volumes).", 
+  "output": "Optimized flow allocations (routing schemes) and switch forwarding table entries.", 
+  "architecture": "Centralized" 
+}
+```
+
+**Step-by-step derivation for clarity:**
+
+*   **Q1 (Sub-field):** The text discusses "manage the traffic on their WANs" (Traffic Engineering/WAN) and "encoded into switch forwarding tables using software-defined networking techniques" (SDN).
+*   **Q2 (System Name):** The Introduction states, "Our solution NCFlow achieves a high-quality flow allocation..."
+*   **Q3 (Problem):** The text notes that as networks grow, "solving multi-commodity flow problems... becomes practically intractable" due to "algorithm run time" and "scaling pressure on limited space in switch forwarding tables."
+*   **Q4 (Input/Output/Architecture):**
+    *   _Inputs:_ Defined in Background as "Given a set of nodes, capacitated edges, and demands between nodes."
+    *   _Outputs:_ Defined in Introduction as "computed routes... encoded into switch forwarding tables" and "flow allocation."
+    *   _Architecture:_ The system computes "optimal routing schemes" using "software-defined networking techniques" (typically centralized control). While it decomposes the math into parallel sub-problems, the coordination and deployment ("pushed into the switch forwarding entries") follow a centralized SDN workflow.
+
+Would you like me to explain the specific clustering algorithm NCFlow uses to achieve this parallelism?
+
+## Prompt:
 Good and now,
 
 Please try to divide the process of reproducing the system into several relatively independent key functional steps. You should give a brief description and a detailed description for each step, as well as the input information required and the output information produced by each functional step. If the introduction section explicitly contains section organization information for these steps, please also provide the serial numbers of the sections to which these steps belong, so that I can look it up. Otherwise, just answer it "UNKNOWN" and please don't try to make it up.
